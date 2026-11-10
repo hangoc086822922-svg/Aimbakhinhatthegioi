@@ -1,0 +1,233 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Cấu hình tốc độ lú là bắn ngay
+local Settings = {
+    AimbotEnabled = false,
+    AutoShootEnabled = true,
+    WallCheck = true,
+    TeamCheck = true,
+    FOVRadius = 200,     -- Vòng quét rộng để bắt địch siêu tốc ngay khi vừa ló mặt
+}
+
+---------------------------------------------------------
+-- TẠO VÒNG TRÒN FOV
+---------------------------------------------------------
+local FOVGui = Instance.new("ScreenGui")
+FOVGui.Name = "InstantShootGui"
+FOVGui.ResetOnSpawn = false
+FOVGui.Parent = CoreGui
+
+local FOVFrame = Instance.new("Frame")
+FOVFrame.Name = "FOVCircle"
+FOVFrame.Parent = FOVGui
+FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+FOVFrame.Size = UDim2.new(0, Settings.FOVRadius * 2, 0, Settings.FOVRadius * 2)
+FOVFrame.BackgroundTransparency = 1
+FOVFrame.Visible = false
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(1, 0)
+UICorner.Parent = FOVFrame
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(255, 128, 0) -- Màu cam rực lửa
+UIStroke.Thickness = 2.5
+UIStroke.Parent = FOVFrame
+
+-- Hàm kiểm tra tường siêu tốc
+local function isVisible(targetPart, targetCharacter)
+    if not Settings.WallCheck then return true end
+    local origin = Camera.CFrame.Position
+    local direction = targetPart.Position - origin
+    
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, targetCharacter}
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.IgnoreWater = true
+    
+    local rayResult = Workspace:Raycast(origin, direction, rayParams)
+    if rayResult then return false end
+    return true
+end
+
+-- Hàm tìm bộ phận lộ ra gần tâm nhất trong vòng tròn
+local function getClosestPartInFOV()
+    local bestPart = nil
+    local shortestDistance = math.huge
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if not Settings.TeamCheck or player.Team ~= LocalPlayer.Team then
+                local character = player.Character
+                if character and character:FindFirstChild("Humanoid") and character.Humanoid.Health > 0 then
+                    
+                    local partsToCheck = {
+                        character:FindFirstChild("Head"),
+                        character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso"),
+                        character:FindFirstChild("HumanoidRootPart"),
+                        character:FindFirstChild("Left Arm") or character:FindFirstChild("LeftUpperArm"),
+                        character:FindFirstChild("Right Arm") or character:FindFirstChild("RightUpperArm"),
+                        character:FindFirstChild("Left Leg") or character:FindFirstChild("LeftUpperLeg"),
+                        character:FindFirstChild("Right Leg") or character:FindFirstChild("RightUpperLeg")
+                    }
+
+                    for _, part in ipairs(partsToCheck) do
+                        if part then
+                            local screenPoint, onScreen = Camera:WorldToViewportPoint(part.Position)
+                            if onScreen and isVisible(part, character) then
+                                local partScreenPos = Vector2.new(screenPoint.X, screenPoint.Y)
+                                local mouseDist = (partScreenPos - screenCenter).Magnitude
+                                
+                                if mouseDist <= Settings.FOVRadius and mouseDist < shortestDistance then
+                                    shortestDistance = mouseDist
+                                    bestPart = part
+                                end
+                            end
+                        end
+                    end
+                    
+                end
+            end
+        end
+    end
+    return bestPart
+end
+
+-- Hàm kích hoạt súng bắn ngay lập tức (Không qua độ trễ chuột ảo)
+local function triggerInstantShoot()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local tool = character:FindFirstChildOfClass("Tool")
+    if tool then
+        pcall(function()
+            tool:Activate()
+        end)
+    end
+end
+
+-- Vòng lặp khóa cứng mục tiêu và spam bắn tức thì
+RunService:BindToRenderStep("InstantAimAndShoot", Enum.RenderPriority.Camera.Value + 1, function()
+    if Settings.AimbotEnabled then
+        FOVFrame.Visible = true
+        local targetPart = getClosestPartInFOV()
+        
+        if targetPart then
+            -- Khóa cứng góc nhìn vào bộ phận vừa lộ ra
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
+            
+            -- Vừa lú vào vòng tròn là kích hoạt bắn ngay lập tức
+            if Settings.AutoShootEnabled then
+                triggerInstantShoot()
+            end
+        end
+    else
+        FOVFrame.Visible = false
+    end
+end)
+
+---------------------------------------------------------
+-- GIAO DIỆN MENU TRÊN DI ĐỘNG
+---------------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "InstantShootMenu"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+local OpenButton = Instance.new("TextButton")
+OpenButton.Parent = ScreenGui
+OpenButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+OpenButton.Position = UDim2.new(0.05, 0, 0.15, 0)
+OpenButton.Size = UDim2.new(0, 110, 0, 40)
+OpenButton.Font = Enum.Font.SourceSansBold
+OpenButton.Text = "Menu Aim"
+OpenButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+OpenButton.TextSize = 16
+OpenButton.Active = true
+OpenButton.Draggable = true
+
+local UICornerOpen = Instance.new("UICorner")
+UICornerOpen.CornerRadius = UDim.new(0, 8)
+UICornerOpen.Parent = OpenButton
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.Position = UDim2.new(0.05, 0, 0.23, 0)
+MainFrame.Size = UDim2.new(0, 220, 0, 210)
+MainFrame.Visible = false
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+local UICornerFrame = Instance.new("UICorner")
+UICornerFrame.CornerRadius = UDim.new(0, 10)
+UICornerFrame.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Parent = MainFrame
+Title.BackgroundTransparency = 1
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.Font = Enum.Font.SourceSansBold
+Title.Text = "VỪA LÚ LÀ BẮN NGAY"
+Title.TextColor3 = Color3.fromRGB(255, 128, 0)
+Title.TextSize = 12
+
+local function createToggle(name, defaultState, posY, callback)
+    local btn = Instance.new("TextButton")
+    btn.Parent = MainFrame
+    btn.BackgroundColor3 = defaultState and Color3.fromRGB(30, 90, 30) or Color3.fromRGB(50, 50, 50)
+    btn.Position = UDim2.new(0.05, 0, 0, posY)
+    btn.Size = UDim2.new(0.9, 0, 0, 35)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.Text = name .. (defaultState and ": ON" or ": OFF")
+    btn.TextColor3 = defaultState and Color3.fromRGB(70, 255, 70) or Color3.fromRGB(255, 70, 70)
+    btn.TextSize = 14
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+    
+    local state = defaultState
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        callback(state)
+        if state then
+            btn.Text = name .. ": ON"
+            btn.TextColor3 = Color3.fromRGB(70, 255, 70)
+            btn.BackgroundColor3 = Color3.fromRGB(30, 90, 30)
+        else
+            btn.Text = name .. ": OFF"
+            btn.TextColor3 = Color3.fromRGB(255, 70, 70)
+            btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        end
+    end)
+end
+
+createToggle("Instant Aim", Settings.AimbotEnabled, 40, function(state)
+    Settings.AimbotEnabled = state
+end)
+
+createToggle("Vừa lú là bắn", Settings.AutoShootEnabled, 80, function(state)
+    Settings.AutoShootEnabled = state
+end)
+
+createToggle("Chặn tường", Settings.WallCheck, 120, function(state)
+    Settings.WallCheck = state
+end)
+
+createToggle("Lọc đồng đội", Settings.TeamCheck, 160, function(state)
+    Settings.TeamCheck = state
+end)
+
+OpenButton.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
